@@ -3,6 +3,7 @@ task samtofastq {
     File input_bam_cram
     String prefix
     File? reference_fasta
+    File? reference_fasta_index
 
     Float memory
     Int java_memory = floor(memory - 0.5)
@@ -30,7 +31,7 @@ task samtofastq {
     }
 
     runtime {
-        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V9"
+        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V10"
         memory: "${memory}GB"
         disks: "local-disk ${disk_space} HDD"
         cpu: "${num_threads}"

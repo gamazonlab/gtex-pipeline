@@ -32,6 +32,9 @@ task star {
     Int? chimMainSegmentMultNmax
     Int? chimOutJunctionFormat
     File? sjdbFileChrStartEnd
+    String? quantTranscriptomeSAMoutput
+    Int? winAnchorMultimapNmax
+    String? genomeTransformOutput
 
     Int memory
     Int disk_space
@@ -71,6 +74,7 @@ task star {
         mkdir star_out
         # placeholders for optional outputs
         touch star_out/${prefix}.Aligned.toTranscriptome.out.bam
+        touch star_out/${prefix}.Chimeric.out.junction.gz
         touch star_out/${prefix}.Chimeric.out.sorted.bam
         touch star_out/${prefix}.Chimeric.out.sorted.bam.bai
         touch star_out/${prefix}.ReadsPerGene.out.tab  # run_STAR.py will gzip
@@ -104,6 +108,9 @@ task star {
             ${"--chimMainSegmentMultNmax " + chimMainSegmentMultNmax} \
             ${"--chimOutJunctionFormat " + chimOutJunctionFormat} \
             ${"--sjdbFileChrStartEnd " + sjdbFileChrStartEnd} \
+            ${"--quantTranscriptomeSAMoutput " + quantTranscriptomeSAMoutput} \
+            ${"--winAnchorMultimapNmax " + winAnchorMultimapNmax} \
+            ${"--genomeTransformOutput " + genomeTransformOutput} \
             --threads ${num_threads}
     }
 
@@ -121,7 +128,7 @@ task star {
     }
 
     runtime {
-        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V9"
+        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V10"
         memory: "${memory}GB"
         disks: "local-disk ${disk_space} HDD"
         cpu: "${num_threads}"

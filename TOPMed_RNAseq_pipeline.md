@@ -1,43 +1,48 @@
 # TOPMed RNA-seq pipeline harmonization summary
 
+### *Note: this is a draft of the next pipeline iteration. Software and reference versions may change.*
+
 This document is intended to ensure reproducibility of analyses and facilitate harmonization of pipelines, defines primary file locations and accessible download locations, and formalizes the TOPMed RNA-seq pipeline components and parameters. All relevant compute parameters are assumed to be software defaults for the versions listed unless specified otherwise (with the exception of directory/file paths, number of threads, etc.).
 
 All wrapper scripts are available from the GTEx pipeline repository: [https://github.com/broadinstitute/gtex-pipeline](https://github.com/broadinstitute/gtex-pipeline)
 
-The current scripts and settings used for TOPMed RNA-seq match commit [1731ed9](https://github.com/broadinstitute/gtex-pipeline/tree/1731ed9c81c9ae301c6f16d6d1c6719d272fd861), packaged [here](https://github.com/broadinstitute/gtex-pipeline/releases/tag/TOPMed_MESA_RNAseq_pilot).
-
 *Changes to this specification may be proposed based on rigorous benchmarking, pending approval of NHLBI.*
 
-#### Previous versions
-The scripts and settings used for the TOPMed MESA RNA-seq pilot match commit [725a2bc](https://github.com/broadinstitute/gtex-pipeline/tree/725a2bc74f9654244065256df91b44e8f5b7e62a), packaged [here](https://github.com/broadinstitute/gtex-pipeline/releases/tag/TOPMed_MESA_RNAseq_pilot).
+#### Previous versions of the pipeline
+* TOPMed [Phase 4 studies](https://www.nhlbiwgs.org/group/project-studies): available [here](https://github.com/broadinstitute/gtex-pipeline/releases/tag/TOPMed_RNAseq_v2).
+* TOPMed MESA RNA-seq pilot: available [here](https://github.com/broadinstitute/gtex-pipeline/releases/tag/TOPMed_MESA_RNAseq_pilot).
 
 ### Pipeline summary
-The TOPMed RNA-Seq pipeline generates, for each sample:
+The GTEx/TOPMed RNA-Seq pipeline generates, for each sample:
 
 1. Aligned RNA-seq reads in BAM format.
-2. Standard quality control metrics derived from the aligned reads.
+2. Standard quality control metrics derived from the FASTQs and aligned reads.
 3. Gene-level expression quantifications based on a collapsed version of a reference transcript annotation, provided as read counts and TPM.
 4. Transcript-level expression quantifications, provided as TPM, expected read counts, and isoform percentages.
 
 This document also describes the generation of the reference files required for each pipeline component.
 
 ### Pipeline components
-* Alignment: [STAR 2.6.1d](https://github.com/alexdobin/STAR)
-  * Post-processing: [Picard 2.18.17](https://github.com/broadinstitute/picard) [MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates)
-* Gene quantification and quality control: [RNA-SeQC 2.3.3](https://github.com/broadinstitute/rnaseqc)
-* Transcript quantification: [RSEM 1.3.1](https://deweylab.github.io/RSEM/)
-* Utilities: [SAMtools 1.9](https://github.com/samtools/samtools/releases) and [HTSlib 1.9](https://github.com/samtools/htslib/releases)
+* Sequencing quality control: [FastQC 0.11.9](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
+* Alignment: [STAR 2.7.10a](https://github.com/alexdobin/STAR)
+  * Post-processing: [Picard 2.27.1](https://github.com/broadinstitute/picard) [MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates)
+* Gene quantification and quality control: [RNA-SeQC 2.4.2](https://github.com/broadinstitute/rnaseqc)
+* Transcript quantification: [RSEM 1.3.3](https://deweylab.github.io/RSEM/)
+* Utilities: [SAMtools 1.19.2](https://github.com/samtools/samtools/releases) and [HTSlib 1.19.1](https://github.com/samtools/htslib/releases)
 
 ### Reference files
-This section describes the GRCh38 reference genome and GENCODE 30 annotation used, including the addition of ERCC spike-in annotations.
+This section describes the GRCh38 reference genome and GENCODE 39 annotation used, including the addition of ERCC spike-in annotations.
 
 The reference files described in this section can be obtained through the following links:
-* Reference genome for RNA-seq alignment (contains .fasta, .fai, and .dict files): [Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.tar.gz](https://personal.broadinstitute.org/francois/topmed/Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.tar.gz)
-* Collapsed gene model: [gencode.v30.GRCh38.ERCC.genes.collapsed_only.gtf.gz](https://personal.broadinstitute.org/francois/topmed/gencode.v30.GRCh38.ERCC.genes.collapsed_only.gtf.gz)
-* STAR index: [STAR_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v30_oh100.tar.gz](https://personal.broadinstitute.org/francois/topmed/STAR_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v30_oh100.tar.gz)
-* RSEM reference: [rsem_reference_GRCh38_gencode30_ercc.tar.gz](https://personal.broadinstitute.org/francois/topmed/rsem_reference_GRCh38_gencode30_ercc.tar.gz)
+* Reference genome for RNA-seq alignment:
+  * [Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.dict](https://console.cloud.google.com/storage/browser/_details/gtex-resources/references/Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.dict)
+  * [Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.fasta](https://console.cloud.google.com/storage/browser/_details/gtex-resources/references/Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.fasta)
+  * [Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.fasta.fai](https://console.cloud.google.com/storage/browser/_details/gtex-resources/references/Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.fasta.fai)
+* Collapsed gene model: [gencode.v39.GRCh38.ERCC.genes.stranded.gtf](https://console.cloud.google.com/storage/browser/_details/gtex-resources/GENCODE/gencode.v39.GRCh38.ERCC.genes.stranded.gtf)
+* STAR index: [STARv275a_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v39_oh100.tar.gz](https://console.cloud.google.com/storage/browser/_details/gtex-resources/STAR_genomes/STAR_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v39_oh100.tar.gz)
+* RSEM reference: [rsem_reference_GRCh38_gencode39_ercc.tar.gz](https://console.cloud.google.com/storage/browser/_details/gtex-resources/RSEM_references/rsem_reference_GRCh38_gencode39_ercc.tar.gz)
 
-*Note: the reference genome is based on the Broad Institute's GRCh38 reference, which is used for aligning TOPMed whole genome sequence data.*
+*Note: the reference genome is based on the Broad Institute's GRCh38 reference, which is also used for aligning TOPMed whole genome sequence data.*
 
 #### Genome reference
 
@@ -46,7 +51,7 @@ For RNA-seq analyses, a reference FASTA excluding ALT, HLA, and Decoy contigs wa
 *Note: The reference produced after filtering out ALT, HLA, and Decoy contigs is identical to the one used by ENCODE ([FASTA file](https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz)). However, the ENCODE reference does not  include ERCC spike-in sequences.*
 
 1. The Broad Institute's [GRCh38 reference](https://gatk.broadinstitute.org/hc/en-us/articles/360035890811-Resource-bundle) can be obtained from the Broad Institute's FTP server (ftp://gsapubftp-anonymous@ftp.broadinstitute.org/bundle/hg38/) or from [Google Cloud](https://console.cloud.google.com/storage/browser/genomics-public-data/resources/broad/hg38/v0).
-2. ERCC spike-in reference annotations were downloaded from [ThermoFisher](https://tools.thermofisher.com/content/sfs/manuals/ERCC92.zip) (the archive contains two files, ERCC92.fa and ERCC92.gtf) and processed as detailed below. The patched ERCC references are also available [here](https://personal.broadinstitute.org/francois/resources/).<br>The ERCC FASTA was patched for compatibility with RNA-SeQC/GATK using
+2. ERCC spike-in reference annotations were downloaded from [ThermoFisher](https://tools.thermofisher.com/content/sfs/manuals/ERCC92.zip) (the archive contains two files, ERCC92.fa and ERCC92.gtf) and processed as detailed below. The patched ERCC references are also available [here](https://github.com/broadinstitute/gtex-pipeline/tree/master/rnaseq/references).<br>The ERCC FASTA was patched for compatibility with RNA-SeQC/GATK using
     ```bash
     sed 's/ERCC-/ERCC_/g' ERCC92.fa > ERCC92.patched.fa
     ```
@@ -81,69 +86,71 @@ For RNA-seq analyses, a reference FASTA excluding ALT, HLA, and Decoy contigs wa
 
 #### Reference annotation
 The reference annotations were prepared as follows:
-1. The [GENCODE 30](https://www.gencodegenes.org/human/release_30.html) annotation was downloaded from the GENCODE  [FTP](ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_30/gencode.v30.annotation.gtf.gz).
+1. The comprehensive gene annotation was downloaded from [GENCODE](https://www.gencodegenes.org/human/release_39.html): [gencode.v39.annotation.gtf.gz](https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_39/gencode.v39.annotation.gtf.gz).
 
 2. For gene-level quantifications, the annotation was collapsed with the [script](https://github.com/broadinstitute/gtex-pipeline/blob/master/gene_model/collapse_annotation.py) used in the [GTEx pipeline](https://github.com/broadinstitute/gtex-pipeline/tree/master/gene_model):
     ```bash
     python3 collapse_annotation.py \
-        --collapse_only gencode.v30.GRCh38.annotation.gtf \
-        gencode.v30.GRCh38.genes.collapsed_only.gtf
+        --stranded \
+        gencode.v39.GRCh38.annotation.gtf \
+        gencode.v39.GRCh38.genes.stranded.gtf
     ```
 3. Gene- and transcript-level attributes were added to the ERCC GTF with the following Python code:
     ```python
-    with open('ERCC92.gtf') as exon_gtf, open('ERCC92.genes.patched.gtf', 'w') as gene_gtf:
-    for line in exon_gtf:
-        f = line.strip().split('\t')
-        f[0] = f[0].replace('-','_')  # required for RNA-SeQC/GATK (no '-' in contig name)
+    with open('ERCC92.gtf') as exon_gtf, open('ERCC92.patched.gtf', 'w') as gene_gtf:
+        for line in exon_gtf:
+            f = line.strip().split('\t')
+            f[0] = f[0].replace('-', '_')  # required for RNA-SeQC/GATK (no '-' in contig name)
+            f[5] = '.'
 
-        attr = f[8]
-        if attr[-1]==';':
-            attr = attr[:-1]
-        attr = dict([i.split(' ') for i in attr.replace('"','').split('; ')])
-        # add gene_name, gene_type
-        attr['gene_name'] = attr['gene_id']
-        attr['gene_type'] = 'ercc_control'
-        attr['gene_status'] = 'KNOWN'
-        attr['level'] = 2
-        for k in ['id', 'type', 'name', 'status']:
-            attr['transcript_'+k] = attr['gene_'+k]
+            attr = f[8]
+            if attr[-1] == ';':
+                attr = attr[:-1]
+            attr = dict([i.split(' ') for i in attr.replace('"', '').split('; ')])
+            # add gene_name, gene_type
+            attr['gene_name'] = attr['gene_id']
+            attr['gene_type'] = 'ercc_control'
+            attr['gene_status'] = 'KNOWN'
+            attr['level'] = 2
+            for k in ['id', 'type', 'name', 'status']:
+                attr[f'transcript_{k}'] = attr[f'gene_{k}']
 
-        attr_str = []
-        for k in ['gene_id', 'transcript_id', 'gene_type', 'gene_status', 'gene_name',
-            'transcript_type', 'transcript_status', 'transcript_name']:
-            attr_str.append('{0:s} "{1:s}";'.format(k, attr[k]))
-        attr_str.append('{0:s} {1:d};'.format('level', attr['level']))
-        f[8] = ' '.join(attr_str)
+            attr_str = []
+            for k in ['gene_id', 'transcript_id', 'gene_type', 'gene_status', 'gene_name',
+                'transcript_type', 'transcript_status', 'transcript_name']:
+                attr_str.append(f'{k} "{attr[k]}";')
+            attr_str.append(f"level {attr['level']};")
+            f[8] = ' '.join(attr_str)
 
-        # write gene, transcript, exon
-        gene_gtf.write('\t'.join(f[:2]+['gene']+f[3:])+'\n')
-        gene_gtf.write('\t'.join(f[:2]+['transcript']+f[3:])+'\n')
-        f[8] = ' '.join(attr_str[:2])
-        gene_gtf.write('\t'.join(f[:2]+['exon']+f[3:])+'\n')
+            # write gene, transcript, exon
+            gene_gtf.write('\t'.join(f[:2] + ['gene'] + f[3:]) + '\n')
+            gene_gtf.write('\t'.join(f[:2] + ['transcript'] + f[3:]) + '\n')
+            f[8] = ' '.join(attr_str[:2])
+            gene_gtf.write('\t'.join(f[:2] + ['exon'] + f[3:]) + '\n')
     ```
 
 4. The ERCC annotation was appended to the reference GTFs:
     ```bash
-    cat gencode.v30.GRCh38.annotation.gtf ERCC92.genes.patched.gtf \
-        > gencode.v30.GRCh38.annotation.ERCC.gtf
-    cat gencode.v30.GRCh38.genes.gtf ERCC92.genes.patched.gtf \
-        > gencode.v30.GRCh38.ERCC.genes.gtf
+    cat gencode.v39.GRCh38.annotation.gtf ERCC92.patched.gtf \
+        > gencode.v39.GRCh38.annotation.ERCC.gtf
+    cat gencode.v39.GRCh38.genes.gtf ERCC92.patched.gtf \
+        > gencode.v39.GRCh38.ERCC.genes.gtf
     ```
 
 #### STAR index
 All RNA-seq samples were sequenced as 2x101bp paired-end, and the STAR index was generated accordingly:
 ```bash
 STAR --runMode genomeGenerate \
-    --genomeDir STAR_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v30_oh100 \
+    --genomeDir STAR_genome_GRCh38_noALT_noHLA_noDecoy_ERCC_v39_oh100 \
     --genomeFastaFiles Homo_sapiens_assembly38_noALT_noHLA_noDecoy.fasta ERCC92.patched.fa \
-    --sjdbGTFfile gencode.v30.GRCh38.annotation.ERCC92.gtf \
+    --sjdbGTFfile gencode.v39.GRCh38.annotation.ERCC92.gtf \
     --sjdbOverhang 100 --runThreadN 10
 ```
 #### RSEM reference
 The RSEM references were generated using:
 ```bash
 rsem-prepare-reference --num-threads 10 \
-    --gtf gencode.v30.GRCh38.annotation.ERCC92.gtf \
+    --gtf gencode.v39.GRCh38.annotation.ERCC92.gtf \
     Homo_sapiens_assembly38_noALT_noHLA_noDecoy.fasta,ERCC92.patched.fa \
     rsem_reference
 ```
@@ -151,39 +158,46 @@ rsem-prepare-reference --num-threads 10 \
 ### Installation of pipeline components
 This section lists the source repositories and installation instructions for the pipeline components. The instruction replicate those in the pipeline [Dockerfile](https://github.com/broadinstitute/gtex-pipeline/blob/master/rnaseq/Dockerfile).
 
-1. STAR v2.6.1d:
+1. FastQC v0.11.9:
     ```
     cd /opt && \
-    wget --no-check-certificate https://github.com/alexdobin/STAR/archive/2.6.1d.tar.gz && \
-    tar -xf 2.6.1d.tar.gz && rm 2.6.1d.tar.gz && \
-    make STAR -C STAR-2.6.1d/source && make STARlong -C STAR-2.6.1d/source && \
-    mv STAR-2.6.1d/source/STAR* STAR-2.6.1d/bin/Linux_x86_64/
-    PATH /opt/STAR-2.6.1d/bin/Linux_x86_64:$PATH
+    wget https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.9.zip && \
+    unzip fastqc_v0.11.9.zip && mv FastQC FastQC-0.11.9 && cd FastQC-0.11.9 && chmod 775 fastqc
+    PATH=/opt/FastQC-0.11.9:$PATH
     ```
 
-2. Picard v2.18.17 or later (for MarkDuplicates):
+2. STAR 2.7.10a:
+    ```
+    cd /opt && \
+    wget --no-check-certificate https://github.com/alexdobin/STAR/archive/2.7.10a.tar.gz && \
+    tar -xf 2.7.10a.tar.gz && rm 2.7.10a.tar.gz
+    PATH=/opt/STAR-2.7.10a/bin/Linux_x86_64_static:$PATH
+    ```
+
+3. Picard v2.27.1 or later (for MarkDuplicates):
     ```
     mkdir /opt/picard-tools && \
     wget --no-check-certificate \
         -P /opt/picard-tools/ \
-        https://github.com/broadinstitute/picard/releases/download/2.18.17/picard.jar
+        https://github.com/broadinstitute/picard/releases/download/2.27.1/picard.jar
     ```
 
-3. RSEM v1.3.1:
+4. RSEM v1.3.3:
     ```
     cd /opt && \
     wget --no-check-certificate \
-        https://github.com/deweylab/RSEM/archive/v1.3.1.tar.gz && \
-    tar -xvf v1.3.1.tar.gz && rm v1.3.1.tar.gz && cd RSEM-1.3.1 && make
-    PATH /opt/RSEM-1.3.1:$PATH
+        https://github.com/deweylab/RSEM/archive/v1.3.3.tar.gz && \
+    tar -xvf v1.3.3.tar.gz && rm v1.3.3.tar.gz && cd RSEM-1.3.3 && make
+    PATH=/opt/RSEM-1.3.1:$PATH
     ```
 
-4. RNA-SeQC v2.3.3:
+5. RNA-SeQC v2.4.2:
     ```
-    cd /opt && \
-    git clone --recursive https://github.com/broadinstitute/rnaseqc.git && \
-    cd rnaseqc && make && make clean
-    PATH /opt/rnaseqc:$PATH
+    mkdir /opt/rnaseqc && cd /opt/rnaseqc && \
+    wget https://github.com/getzlab/rnaseqc/releases/download/v2.4.2/rnaseqc.v2.4.2.linux.gz && \
+    gunzip rnaseqc.v2.4.2.linux.gz && mv rnaseqc.v2.4.2.linux rnaseqc && chmod 775 rnaseqc
+    PATH=/opt/rnaseqc:$PATH
+    pip3 install rnaseqc
     ```
 
 ### Pipeline parameters
@@ -269,7 +283,7 @@ The following variables must be defined:
 * `sample_id`: sample identifier; this will be prepended to output files
 * `rsem_reference`: path to the directory containing the RSEM reference
 * `genome_fasta`: path to the reference genome (`Homo_sapiens_assembly38_noALT_noHLA_noDecoy_ERCC.fasta` as described above)
-* `genes_gtf`: path to the collapsed, gene-level GTF (`gencode.v30.GRCh38.ERCC.genes.gtf` as described above)
+* `genes_gtf`: path to the collapsed, gene-level GTF (`gencode.v39.GRCh38.ERCC.genes.gtf` as described above)
 
 1. STAR ([run_STAR.py](rnaseq/src/run_STAR.py))
     ```bash

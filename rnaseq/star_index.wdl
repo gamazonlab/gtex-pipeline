@@ -4,6 +4,10 @@ task star_index {
     File annotation_gtf
     String prefix
     Int overhang
+    Int? limit_sjdb_insert_junctions
+    Int? suffix_length_max
+    String? transform_type
+    File? transform_vcf
 
     Int memory
     Int disk_space
@@ -11,6 +15,7 @@ task star_index {
     Int num_preempt
 
     command {
+        set -euo pipefail
         mkdir ${prefix}
         STAR \
             --runMode genomeGenerate \
@@ -18,6 +23,10 @@ task star_index {
             --genomeFastaFiles ${reference_fasta} \
             --sjdbGTFfile ${annotation_gtf} \
             --sjdbOverhang ${overhang} \
+            ${"--limitSjdbInsertNsj " + limit_sjdb_insert_junctions} \
+            ${"--genomeSuffixLengthMax " + suffix_length_max} \
+            ${"--genomeTransformType " + transform_type} \
+            ${"--genomeTransformVCF " + transform_vcf} \
             --runThreadN ${num_threads}
         tar -cvzf ${prefix}.tar.gz ${prefix}
     }
@@ -27,7 +36,7 @@ task star_index {
     }
 
     runtime {
-        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V9"
+        docker: "gcr.io/broad-cga-francois-gtex/gtex_rnaseq:V10"
         memory: "${memory}GB"
         disks: "local-disk ${disk_space} HDD"
         cpu: "${num_threads}"

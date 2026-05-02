@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import glob
 from sklearn.decomposition import PCA
+import qtl.io
 
 
 @contextlib.contextmanager
@@ -21,207 +22,234 @@ def cd(cd_path):
     os.chdir(saved_path)
 
 
-def gtf_to_bed(annotation_gtf, feature='gene'):
+def get_introns(intron_counts_df):
+    intron_df = pd.DataFrame([i.split(':') for i in intron_counts_df.index],
+                             columns=['chr', 'start', 'end', 'clu'])
+    intron_df['start'] = intron_df['start'].astype(np.int32)
+    intron_df['end'] = intron_df['end'].astype(np.int32)
+    return intron_df
+
+
+def map_cluster_to_genes(intron_df, exon_df, strict=True, verbose=False):
+    matches_df = []
+    num_unmatched = 0
+    num_unpaired = 0
+    for c in sorted(intron_df['chr'].unique()):
+        introns_chr = intron_df[intron_df['chr'] == c]
+        exons_chr = exon_df[exon_df['chr'] == c]
+        five_prime_matches = introns_chr.merge(exons_chr, left_on='start', right_on='end', how='inner')
+        three_prime_matches = introns_chr.merge(exons_chr, left_on='end', right_on='start', how='inner')
+        # clusters without any matches
+        num_unmatched += introns_chr.loc[~introns_chr['clu'].isin(five_prime_matches['clu'])
+                                       & ~introns_chr['clu'].isin(three_prime_matches['clu']), 'clu'].nunique()
+
+        if strict:
+            # only assign clusters that have both 5' and 3' matches to the same gene
+            set5 = set([tuple(i) for i in five_prime_matches[['clu', 'gene_id']].drop_duplicates().values])
+            set3 = set([tuple(i) for i in three_prime_matches[['clu', 'gene_id']].drop_duplicates().values])
+            all_matches = pd.DataFrame(set5 & set3, columns=['clu', 'gene_id'])
+            unpaired_matches = sorted([i for i in set5 ^ set3 if i[0] not in all_matches['clu'].values])
+            num_unpaired += len(np.unique([i[0] for i in unpaired_matches]))
+        else:
+            all_matches = pd.concat([three_prime_matches, five_prime_matches])[['clu', 'gene_id']].drop_duplicates()
+
+        all_matches['clu'] = c + ':' + all_matches['clu']
+        matches_df.append(all_matches)
+    matches_df = pd.concat(matches_df).reset_index(drop=True)
+    clu_s = matches_df.groupby('clu', sort=True).apply(
+        lambda x: ','.join(x['gene_id']), include_groups=False).rename('genes')
+
+    if verbose:
+        total_clusters = intron_df['clu'].nunique()
+        print(f"Total clusters: {total_clusters}")
+        print(f"  * with ≥1 match: {matches_df['clu'].nunique()} ({matches_df['clu'].nunique()/total_clusters*100:.2f}%)")
+        print(f"  * unpaired: {num_unpaired} ({num_unpaired/total_clusters*100:.2f}%)")
+        print(f"  * unmatched: {num_unmatched} ({num_unmatched/total_clusters*100:.2f}%)")
+
+    return clu_s
+
+
+def run_leafcutter_clustering(junc_files_list, leafcutter_dir, prefix, output_dir='.',
+                              min_clu_reads=30, min_clu_ratio=0.001, max_intron_len=500000):
     """
-    Parse genes from GTF, create placeholder DataFrame for BED output
+    Generates ${prefix}_perind_numers.counts.gz, ${prefix}_perind.counts.gz, ${prefix}.leafcutter.clusters_to_genes.txt
     """
-    chrom = []
-    start = []
-    end = []
-    gene_id = []
-    with open(annotation_gtf, 'r') as gtf:
-        for row in gtf:
-            row = row.strip().split('\t')
-            if row[0][0]=='#' or row[2]!=feature: continue # skip header
-            chrom.append(row[0])
+    print('  * running leafcutter clustering')
+    cmd = f"python3 {os.path.join(leafcutter_dir, 'clustering', 'leafcutter_cluster_regtools.py')} \
+        --juncfiles {junc_files_list} \
+        --outprefix {prefix} \
+        --rundir {output_dir} \
+        --minclureads {min_clu_reads} \
+        --mincluratio {min_clu_ratio} \
+        --maxintronlen {max_intron_len}"
+    subprocess.check_call(cmd, shell=True)
 
-            # TSS: gene start (0-based coordinates for BED)
-            if row[6]=='+':
-                start.append(np.int64(row[3])-1)
-                end.append(np.int64(row[3]))
-            elif row[6]=='-':
-                start.append(np.int64(row[4])-1)  # last base of gene
-                end.append(np.int64(row[4]))
-            else:
-                raise ValueError('Strand not specified.')
+    # delete sorted junc files
+    with open(junc_files_list) as f:
+        junc_files = f.read().strip().split('\n')
+    sorted_files = [os.path.join(output_dir, f'{os.path.basename(i)}.{prefix}.sorted.gz') for i in junc_files]
+    for f in sorted_files:
+        os.remove(f)
+    os.remove(os.path.join(output_dir, f'{prefix}_sortedlibs'))
 
-            gene_id.append(row[8].split(';',1)[0].split(' ')[1].replace('"',''))
-
-    bed_df = pd.DataFrame(
-        data={'chr':chrom, 'start':start, 'end':end, 'gene_id':gene_id},
-        columns=['chr', 'start', 'end', 'gene_id'],
-        index=gene_id)
-    return bed_df
+    with cd(output_dir):
+        print('  * compressing outputs')
+        subprocess.check_call(f'gzip -f {prefix}_pooled', shell=True)
+        subprocess.check_call(f'gzip -f {prefix}_refined', shell=True)
 
 
-def write_bed(bed_df, output_name):
-    """Write DataFrame to BED"""
-    bgzip = subprocess.Popen('bgzip -c > '+output_name,
-        stdin=subprocess.PIPE, shell=True)
-    bed_df.to_csv(bgzip.stdin, sep='\t', index=False)
-    stdout, stderr = bgzip.communicate()
-    subprocess.check_call('tabix -f '+output_name, shell=True)
+def filter_counts(counts_df):
+    calculate_frac = lambda x: float(x[0])/float(x[1]) if x[1] > 0 else 0
+    frac_df = counts_df.map(lambda x: calculate_frac([int(i) for i in x.split('/')]))
+    pct_zero = (frac_df == 0).sum(1) / frac_df.shape[1]  # for zero counts, frac is zero
+    n_unique = frac_df.apply(lambda x: len(x.unique()), axis=1)
+    zscore_df = ((frac_df.T-frac_df.mean(1)) / frac_df.std(1)).T
+
+    # filter out introns with low counts or low complexity
+    n = np.floor(frac_df.shape[1]*0.1)
+    if n < 10:
+        n = 10
+    mask = (pct_zero <= 0.5) & (n_unique >= n)
+    # additional filter for low complexity
+    ns = zscore_df.shape[1]
+    mask2 = ((zscore_df.abs()<0.25).sum(1) >= ns-3) & ((zscore_df.abs() > 6).sum(1) <= 3)
+    if np.any(mask & mask2):
+        print(f'    ** dropping {np.sum(mask & mask2)} introns with low variation')
+    mask = mask & ~mask2
+
+    filtered_counts_df = counts_df.loc[mask].copy()
+    cluster_ids = np.unique(counts_df.index.map(lambda x: x.split(':')[-1]))
+    filtered_cluster_ids = np.unique(filtered_counts_df.index.map(lambda x: x.split(':')[-1]))
+    print('    ** dropping {} introns with counts in fewer than 50% of samples\n'
+          '       {}/{} introns remain ({}/{} clusters)'.format(
+               counts_df.shape[0]-filtered_counts_df.shape[0], filtered_counts_df.shape[0],
+               counts_df.shape[0], len(filtered_cluster_ids), len(cluster_ids))
+        )
+    # drop chrY
+    filtered_counts_df = filtered_counts_df[~filtered_counts_df.index.str.startswith(('chrY:','Y:'))]
+    return filtered_counts_df
+
 
 
 if __name__=='__main__':
 
     parser = argparse.ArgumentParser(description='Run leafcutter clustering, prepare for FastQTL')
-    parser.add_argument('junc_files_list', help='File with paths to ${sample_id}.junc files')
+    parser.add_argument('junc_files_list', help='File with paths to ${sample_id}.regtools_junc.txt.gz files')
     parser.add_argument('exons', help='Exon definitions file, with columns: chr, start, end, strand, gene_id, gene_name')
     parser.add_argument('genes_gtf', help='Collapsed gene annotation in GTF format')
     parser.add_argument('prefix', help='Prefix for output files (sample set ID)')
-    parser.add_argument('--min_clu_reads', default='50', type=str, help='Minimum number of reads supporting each cluster')
+    parser.add_argument('sample_participant_lookup', help='Lookup table linking samples to participants')
+    parser.add_argument('--min_clu_reads', default=30, type=int, help='Minimum number of reads supporting each cluster')
     parser.add_argument('--min_clu_ratio', default='0.001', type=str, help='Minimum fraction of reads in a cluster that support a junction')
-    parser.add_argument('--max_intron_len', default='500000', type=str, help='Maximum intron length')
+    parser.add_argument('--max_intron_len', default=500000, type=int, help='Maximum intron length')
     parser.add_argument('--num_pcs', default=10, type=int, help='Number of principal components to calculate')
     parser.add_argument('--leafcutter_dir', default='/opt/leafcutter',
                         help="leafcutter directory, containing 'clustering' directory")
     parser.add_argument('-o', '--output_dir', default='.', help='Output directory')
     args = parser.parse_args()
 
-    print('['+datetime.now().strftime("%b %d %H:%M:%S")+'] leafcutter clustering')
+    print(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] leafcutter clustering')
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
 
-    with cd(args.output_dir):
+    sample_participant_lookup_s = pd.read_csv(args.sample_participant_lookup,
+                                              sep='\t', index_col=0, header=None, dtype=str).squeeze('columns')
 
-        print('  * decompressing and renaming junc files')
-        with open(args.junc_files_list) as f:
-            junc_files = f.read().strip().split('\n')
+    run_leafcutter_clustering(args.junc_files_list, args.leafcutter_dir, args.prefix, output_dir=args.output_dir,
+                              min_clu_reads=args.min_clu_reads, min_clu_ratio=args.min_clu_ratio, max_intron_len=args.max_intron_len)
 
-        junc_dir = os.path.join(args.output_dir, 'junc_files')
-        if not os.path.exists(junc_dir):
-            os.mkdir(junc_dir)
-        sample_ids = []
-        for f in junc_files:
-            sample_id = os.path.split(f)[1].split('.')[0]
-            sample_ids.append(sample_id)
-            # shutil.move(f, os.path.join(junc_dir, sample_id+'.junc.gz'))
-            shutil.copy2(f, os.path.join(junc_dir, sample_id+'.junc.gz'))
+    counts_df = pd.read_csv(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.gz'), sep='\s+', index_col=0)
+    # change columns to sample IDs
+    col_dict = {i:i.split('.')[0] for i in counts_df.columns}
+    counts_df.rename(columns=col_dict, inplace=True)
+    assert counts_df.columns.isin(sample_participant_lookup_s.index).all()
 
-        subprocess.check_call('gunzip -f '+os.path.join(junc_dir, '*.junc.gz'), shell=True)
-        junc_files = sorted([os.path.join(junc_dir, i+'.junc') for i in sample_ids])
+    print('  * mapping clusters to genes')
+    intron_df = get_introns(counts_df)
+    exon_df = pd.read_csv(args.exons, sep='\t')
+    clu_s = map_cluster_to_genes(intron_df, exon_df, strict=True, verbose=True)
+    clu_s.to_csv(os.path.join(args.output_dir, f'{args.prefix}.leafcutter.clusters_to_genes.txt'), sep='\t')
+    cluster2gene_dict = clu_s.to_dict()
 
-        print('  * running leafcutter clustering')
-        # generates ${prefix}_perind_numers.counts.gz and ${prefix}_perind.counts.gz
-        with tempfile.NamedTemporaryFile(dir=args.output_dir) as tmp:
-            with open(tmp.name, 'w') as f:
-                f.write('\n'.join(junc_files)+'\n')
-            subprocess.check_call(
-                'python '+os.path.join(args.leafcutter_dir, 'clustering', 'leafcutter_cluster.py' \
-                    +' --juncfiles '+tmp.name \
-                    +' --outprefix '+args.prefix \
-                    +' --minclureads '+args.min_clu_reads \
-                    +' --mincluratio '+args.min_clu_ratio \
-                    +' --maxintronlen '+args.max_intron_len), shell=True)
+    print('  * filtering counts')
+    filtered_counts_df = filter_counts(counts_df)
+    filtered_counts_file = os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz')
+    filtered_counts_df.to_csv(filtered_counts_file, sep=' ')
 
-        print('  * compressing outputs')
-        subprocess.check_call('gzip {}_pooled'.format(args.prefix), shell=True)
-        subprocess.check_call('gzip {}_refined'.format(args.prefix), shell=True)
+    print('  * preparing phenotype table')
+    subprocess.check_call(
+        'python3 '+os.path.join(args.leafcutter_dir, 'scripts', 'prepare_phenotype_table.py') \
+        +f' {filtered_counts_file}' \
+        +f' -p {args.num_pcs}', shell=True)
 
-        print('  * mapping clusters to genes')
-        subprocess.check_call(
-            'Rscript' \
-                +' '+os.path.abspath(os.path.join(os.path.dirname(__file__), 'map_clusters_to_genes.R')) \
-                +' '+os.path.join(args.output_dir, args.prefix+'_perind.counts.gz') \
-                +' '+args.exons \
-                +' '+args.prefix + '.leafcutter.clusters_to_genes.txt', shell=True)
+    print('  * concatenating chromosome-level BED files')
+    bed_files = sorted(glob.glob(os.path.join(args.output_dir, '*_perind.counts.filtered.gz.qqnorm_*')))
+    bed_df = []
+    for f in bed_files:
+        bed_df.append(pd.read_csv(f, sep='\t', dtype=str))
+    bed_df = pd.concat(bed_df, axis=0).rename(columns={'#Chr':'chr'})
+    # sort BED
+    bed_df['chr_ix'] = bed_df['chr'].str.replace('chr','').str.replace('X','23').astype(np.int32)
+    for c in ['start', 'end']:
+        bed_df[c] = bed_df[c].astype(np.int32)
+    bed_df.sort_values(['chr_ix', 'start', 'end'], inplace=True)
+    bed_df.drop('chr_ix', axis=1, inplace=True)
 
-        print('  * filtering counts')
-        counts_df = pd.read_csv(os.path.join(args.output_dir, args.prefix+'_perind.counts.gz'), sep='\s+').set_index('chrom')
-        calculate_frac = lambda x: float(x[0])/float(x[1]) if x[1]>0 else 0
-        frac_df = counts_df.applymap(lambda x: calculate_frac([int(i) for i in x.split('/')]))
-        pct_zero = (frac_df==0).sum(axis=1) / frac_df.shape[1]  # for zero counts, frac is zero
-        n_unique = frac_df.apply(lambda x: len(x.unique()), axis=1)
-        zscore_df = ((frac_df.T-frac_df.mean(1)) / frac_df.std(1)).T
+    print('    ** writing merged BED')
+    bed_file = os.path.join(args.output_dir, f'{args.prefix}.perind.counts.filtered.qqnorm.bed.gz')
+    qtl.io.write_bed(bed_df, bed_file)
 
-        # filter out introns with low counts or low complexity
-        n = np.floor(frac_df.shape[1]*0.1)
-        if n<10:
-            n = 10
-        mask = (pct_zero <= 0.5) & (n_unique >= n)
-        # additional filter for low complexity
-        ns = zscore_df.shape[1]
-        mask2 = ((zscore_df.abs()<0.25).sum(1)>=ns-3) & ((zscore_df.abs()>6).sum(1)<=3)
-        if np.any(mask & mask2):
-            print('    ** dropping {} introns with low variation'.format(np.sum(mask & mask2)))
-        mask = mask & ~mask2
+    print('    ** adding TSSs')
+    tss_df = qtl.io.gtf_to_tss_bed(args.genes_gtf)
+    n = 0
+    gene_bed_df = []
+    group_s = {}
+    for _,r in bed_df.iterrows():
+        s = r['ID'].split(':')
+        cluster_id = s[0]+':'+s[-1]
+        if cluster_id in cluster2gene_dict:
+            gene_ids = cluster2gene_dict[cluster_id].split(',')
+            for g in gene_ids:
+                gi = r['ID']+':'+g
+                gene_bed_df.append(tss_df.loc[g, ['chr', 'start', 'end']].tolist() + [gi] + r.iloc[4:].tolist())
+                group_s[gi] = g
+        else:
+            n += 1
+    if n > 0:
+        print(f'    ** discarded {n} introns without a gene mapping')
 
-        filtered_counts_df = counts_df.loc[mask]
-        cluster_ids = np.unique(counts_df.index.map(lambda x: x.split(':')[-1]))
-        filtered_cluster_ids = np.unique(filtered_counts_df.index.map(lambda x: x.split(':')[-1]))
-        print('    ** dropping {} introns with counts in fewer than 50% of samples\n'
-              '       {}/{} introns remain ({}/{} clusters)'.format(
-                   counts_df.shape[0]-filtered_counts_df.shape[0], filtered_counts_df.shape[0], counts_df.shape[0], len(filtered_cluster_ids), len(cluster_ids)
-            ))
-        filtered_counts_file = os.path.join(args.output_dir, args.prefix+'_perind.counts.filtered.gz')
-        with gzip.open(filtered_counts_file, 'wt') as f:
-            filtered_counts_df.to_csv(f, sep=' ')
+    print('  * writing BED files for QTL mapping')
+    gene_bed_df = pd.DataFrame(gene_bed_df, columns=bed_df.columns)
+    # sort by TSS
+    gene_bed_df = pd.concat([gdf.sort_values(['start', 'end']) for _,gdf in gene_bed_df.groupby('chr', sort=False, as_index=False)]).reset_index(drop=True)
+    # change sample IDs to participant IDs
+    gene_bed_df.rename(columns=sample_participant_lookup_s, inplace=True)
+    qtl.io.write_bed(gene_bed_df, os.path.join(args.output_dir, f'{args.prefix}.leafcutter.bed.gz'))
+    gene_bed_df[['start', 'end']] = gene_bed_df[['start', 'end']].astype(np.int32)
+    gene_bed_df[gene_bed_df.columns[4:]] = gene_bed_df[gene_bed_df.columns[4:]].astype(np.float32)
+    gene_bed_df.to_parquet(os.path.join(args.output_dir, f'{args.prefix}.leafcutter.bed.parquet'))
+    pd.Series(group_s).sort_values().to_csv(
+        os.path.join(args.output_dir, f'{args.prefix}.leafcutter.phenotype_groups.txt'),
+        sep='\t', header=False)
 
-        print('  * preparing phenotype table')
-        subprocess.check_call(
-            'python '+os.path.join(args.leafcutter_dir, 'scripts', 'prepare_phenotype_table.py') \
-            +' '+filtered_counts_file \
-            +' -p '+str(args.num_pcs), shell=True)
+    print('  * calculating PCs')
+    pca = PCA(n_components=args.num_pcs)
+    pca.fit(bed_df[bed_df.columns[4:]])
+    pc_df = pd.DataFrame(pca.components_, index=[f'PC{i}' for i in range(1, args.num_pcs+1)],
+        columns=['-'.join(i.split('-')[:2]) for i in bed_df.columns[4:]])
+    pc_df.index.name = 'ID'
+    pc_df.to_csv(os.path.join(args.output_dir, f'{args.prefix}.leafcutter.PCs.txt'), sep='\t')
 
-        print('  * concatenating BED files')
-        bed_files = sorted(glob.glob(os.path.join(args.output_dir, '*_perind.counts.filtered.gz.qqnorm_*')))
-        bed_df = []
-        for f in bed_files:
-            bed_df.append(pd.read_csv(f, sep='\t', dtype=str))
-        bed_df = pd.concat(bed_df, axis=0)
-        print('    ** sorting')
-        # leafcutter doesn't produce output for chrX --> numeric sort
-        for c in ['#Chr', 'start', 'end']:
-            bed_df[c] = bed_df[c].astype(int)
-        bed_df = bed_df.sort_values(['#Chr', 'start', 'end'])
-        print('    ** writing BED')
-        bed_file = os.path.join(args.output_dir, args.prefix+'.perind.counts.filtered.qqnorm.bed.gz')
-        bgzip = subprocess.Popen('bgzip -c > '+bed_file, stdin=subprocess.PIPE, shell=True, universal_newlines=True)
-        stdout, stderr = bgzip.communicate(bed_df.to_csv(sep='\t', index=False))
-        print('    ** indexing')
-        subprocess.check_call('tabix '+bed_file, shell=True)
+    # delete intermediary files
+    files = glob.glob(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz.qqnorm_chr*')) \
+          + glob.glob(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz.phen_chr*'))
+    for f in files:
+        os.remove(f)
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz_prepare.sh'))
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}.leafcutter.clusters_to_genes.txt'))
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}.perind.counts.filtered.qqnorm.bed.gz'))
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}.perind.counts.filtered.qqnorm.bed.gz.tbi'))
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz.ave'))
+    os.remove(os.path.join(args.output_dir, f'{args.prefix}_perind.counts.filtered.gz.PCs'))
 
-        print('  * converting cluster coordinates to gene coordinates')
-        tss_df = gtf_to_bed(args.genes_gtf)
-        cluster2gene_dict = pd.read_csv(os.path.join(args.output_dir, args.prefix + '.leafcutter.clusters_to_genes.txt'),
-            sep='\t', index_col=0, squeeze=True).to_dict()
-
-        # add 'chr' prefix
-        bed_df['#Chr'] = 'chr'+bed_df['#Chr'].astype(str)
-        bed_df['ID'] = 'chr'+bed_df['ID']
-
-        print('    ** assigning introns to gene mapping(s)')
-        n = 0
-        gene_bed_df = []
-        group_s = {}
-        for _,r in bed_df.iterrows():
-            s = r['ID'].split(':')
-            cluster_id = s[0]+':'+s[-1]
-            if cluster_id in cluster2gene_dict:
-                gene_ids = cluster2gene_dict[cluster_id].split(',')
-                for g in gene_ids:
-                    gi = r['ID']+':'+g
-                    gene_bed_df.append(tss_df.loc[g, ['chr', 'start', 'end']].tolist() + [gi] + r.iloc[4:].tolist())
-                    group_s[gi] = g
-            else:
-                n += 1
-        if n>0:
-            print('    ** discarded {} introns without gene mapping'.format(n))
-        print('  * writing FastQTL inputs')
-        gene_bed_df = pd.DataFrame(gene_bed_df, columns=bed_df.columns)
-        gene_bed_df = gene_bed_df.groupby('#Chr', sort=False, group_keys=False).apply(lambda x: x.sort_values('start'))
-        # change sample IDs to participant IDs
-        gene_bed_df.rename(columns={i:'-'.join(i.split('-')[:2]) for i in gene_bed_df.columns[4:]}, inplace=True)
-        write_bed(gene_bed_df, os.path.join(args.output_dir, args.prefix+'.leafcutter.bed.gz'))
-        pd.Series(group_s).sort_values().to_csv(os.path.join(args.output_dir, args.prefix+'.leafcutter.phenotype_groups.txt'), sep='\t')
-
-        print('  * calculating PCs')
-        pca = PCA(n_components=args.num_pcs)
-        pca.fit(bed_df[bed_df.columns[4:]])
-        pc_df = pd.DataFrame(pca.components_, index=['PC{}'.format(i) for i in range(1,11)],
-            columns=['-'.join(i.split('-')[:2]) for i in bed_df.columns[4:]])
-        pc_df.index.name = 'ID'
-        pc_df.to_csv(args.prefix+'.leafcutter.PCs.txt', sep='\t')
-
-print('['+datetime.now().strftime("%b %d %H:%M:%S")+'] done')
+    print(f'[{datetime.now().strftime("%b %d %H:%M:%S")}] done')

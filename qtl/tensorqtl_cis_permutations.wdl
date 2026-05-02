@@ -1,8 +1,8 @@
 task tensorqtl_cis_permutations {
 
-    File plink_bed
-    File plink_bim
-    File plink_fam
+    File plink_pgen
+    File plink_pvar
+    File plink_psam
 
     File phenotype_bed
     File covariates
@@ -11,6 +11,8 @@ task tensorqtl_cis_permutations {
     File? phenotype_groups
     Float? fdr
     Float? qvalue_lambda
+    Int? seed
+    String? flags
 
     Int memory
     Int disk_space
@@ -19,14 +21,16 @@ task tensorqtl_cis_permutations {
 
     command {
         set -euo pipefail
-        plink_base=$(echo "${plink_bed}" | rev | cut -f 2- -d '.' | rev)
+        plink_base=$(echo "${plink_pgen}" | rev | cut -f 2- -d '.' | rev)
         python3 -m tensorqtl \
             $plink_base ${phenotype_bed} ${prefix} \
             --mode cis \
             --covariates ${covariates} \
             ${"--phenotype_groups " + phenotype_groups} \
             ${"--fdr " + fdr} \
-            ${"--qvalue_lambda " + qvalue_lambda}
+            ${"--qvalue_lambda " + qvalue_lambda} \
+            ${"--seed " + seed} \
+            ${flags}
     }
 
     runtime {
